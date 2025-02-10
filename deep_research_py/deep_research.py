@@ -5,11 +5,12 @@ import os
 from firecrawl import FirecrawlApp
 from .ai.providers import openai_client, trim_prompt
 from .prompt import system_prompt
+from .local_book_search import LocalBookSearch
 import json
 
 
 class SearchResponse(TypedDict):
-    data: List[Dict[str, str]]
+    data: List[Dict[str, str | float]]  # float for score field
 
 
 class ResearchResult(TypedDict):
@@ -79,10 +80,14 @@ class Firecrawl:
             return {"data": []}
 
 
-# Initialize Firecrawl
+# Initialize Firecrawl and LocalBookSearch
 firecrawl = Firecrawl(
     api_key=os.environ.get("FIRECRAWL_KEY", ""),
     api_url=os.environ.get("FIRECRAWL_BASE_URL"),
+)
+
+local_book_search = LocalBookSearch(
+    base_dir=os.environ.get("BOOK_SEARCH_DIR", "from_pdf")
 )
 
 
@@ -127,7 +132,7 @@ async def process_serp_result(
     """Process search results to extract learnings and follow-up questions."""
 
     contents = [
-        trim_prompt(item.get("markdown", ""), 25_000)
+        trim_prompt(str(item.get("markdown", "")), 25_000)
         for item in result["data"]
         if item.get("markdown")
     ]
@@ -220,8 +225,8 @@ async def deep_research(
     breadth: int,
     depth: int,
     concurrency: int,
-    learnings: List[str] = None,
-    visited_urls: List[str] = None,
+    learnings: Optional[List[str]] = None,
+    visited_urls: Optional[List[str]] = None,
 ) -> ResearchResult:
     """
     Main research function that recursively explores a topic.
@@ -233,12 +238,12 @@ async def deep_research(
         learnings: Previous learnings to build upon
         visited_urls: Previously visited URLs
     """
-    learnings = learnings or []
-    visited_urls = visited_urls or []
+    current_learnings = learnings if learnings is not None else []
+    current_urls = visited_urls if visited_urls is not None else []
 
     # Generate search queries
     serp_queries = await generate_serp_queries(
-        query=query, num_queries=breadth, learnings=learnings
+        query=query, num_queries=breadth, learnings=current_learnings
     )
 
     # Create a semaphore to limit concurrent requests
@@ -247,10 +252,18 @@ async def deep_research(
     async def process_query(serp_query: SerpQuery) -> ResearchResult:
         async with semaphore:
             try:
-                # Search for content
-                result = await firecrawl.search(
-                    serp_query.query, timeout=15000, limit=5
+                # Search in local books and web content
+                local_result = await local_book_search.search(
+                    serp_query.query, limit=breadth
                 )
+                web_result = await firecrawl.search(
+                    serp_query.query, timeout=15000, limit=breadth
+                )
+                
+                # Combine results (local results first)
+                result = {
+                    "data": local_result["data"] + web_result["data"]
+                }
 
                 # Collect new URLs
                 new_urls = [
@@ -268,8 +281,8 @@ async def deep_research(
                     num_follow_up_questions=new_breadth,
                 )
 
-                all_learnings = learnings + new_learnings["learnings"]
-                all_urls = visited_urls + new_urls
+                all_learnings = current_learnings + new_learnings["learnings"]
+                all_urls = current_urls + new_urls
 
                 # If we have more depth to go, continue research
                 if new_depth > 0:
