@@ -118,6 +118,28 @@ deep-research
   - aiofiles
   - tiktoken
 
+## Book Search Configuration
+
+Set your book search directory using the environment variable:
+
+```bash
+# Optional: Book search directory (default: from_pdf)
+export BOOK_SEARCH_DIR=/path/to/books
+```
+
+The directory should contain OCR data in the following structure:
+```plaintext
+from_pdf/
+└── out_book240506/
+    ├── メカニズムデザインで勝つ： ミクロ経済学のビジネス活用 坂井 豊貴 263p_4532358604/
+    │   └── gyazo_info.json
+    ├── シン・ニホン AI×データ時代における日本の再生と人材育成 （NewsPicksパブリッシング） 安宅和人 444p_4910063048/
+    │   └── gyazo_info.json
+    └── ...
+```
+
+Book directories should follow the format: `{title} {author} {pages}p_{isbn}`
+
 ## Output
 
 The tool generates:
